@@ -83,8 +83,238 @@ $("loginBtn").onclick=async()=>{try{await msalApp.loginRedirect({scopes:graphSco
 $("logoutBtn").onclick=()=>msalApp.logoutRedirect();
 $("confirmCheck").onchange=()=>{$("saveBtn").disabled=!(activeAccount&&$("confirmCheck").checked)};
 $("prepareBtn").onclick=async()=>{try{status("saveStatus","Buscando el libro de Excel en OneDrive…");const path="/me/drive/root:/2. DATOS HISTORICO/PRUEBA_OPERACIONES.xlsx";workbookItem=await graph(path);const ws=await graph("/me/drive/items/"+workbookItem.id+"/workbook/worksheets");const viaje=ws.value.find(x=>x.name.toUpperCase()==="VIAJES");if(!viaje)throw new Error("No encontré la hoja VIAJES en ese libro.");const tabs=await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables");workbookTable=tabs.value.find(t=>t.name.toUpperCase()==="VIAJES"||t.name.toUpperCase()==="TABLAVIAJES")||tabs.value[0];if(workbookTable){status("saveStatus","Excel encontrado: "+workbookItem.name+" · Hoja VIAJES · Tabla "+workbookTable.name+". No se modificó ningún dato.","ok")}else{status("saveStatus","Encontré el libro y la hoja VIAJES, pero no detecté una tabla de Excel. Para evitar alterar tus datos, aún no guardaré filas. Primero debemos convertir el rango de VIAJES en una tabla desde Excel Online.","err")}}catch(e){status("saveStatus","No se pudo comprobar el Excel. Revisa que la ruta sea correcta y que hayas iniciado sesión con la cuenta empresarial que tiene acceso. "+e.message,"err")}};
-async function extractFile(file){if(!file)return "";if(file.type.startsWith("image/")){const result=await Tesseract.recognize(file,"spa+eng",{logger:m=>{if(m.status==="recognizing text")status("ocrStatus","Leyendo imagen: "+Math.round((m.progress||0)*100)+"%")}});return result.data.text}if(file.type==="application/pdf"){const bytes=await file.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:bytes}).promise;const page=await pdf.getPage(1);const viewport=page.getViewport({scale:1.8});const canvas=document.createElement("canvas");canvas.width=viewport.width;canvas.height=viewport.height;await page.render({canvasContext:canvas.getContext("2d"),viewport}).promise;const result=await Tesseract.recognize(canvas,"spa+eng",{logger:m=>{if(m.status==="recognizing text")status("ocrStatus","Leyendo PDF: "+Math.round((m.progress||0)*100)+"%")}});return result.data.text}return ""}
-$("ocrBtn").onclick=async()=>{const a=$("remFile").files[0],b=$("transFile").files[0];if(!a&&!b){status("ocrStatus","Selecciona al menos una guía en PDF o imagen.","err");return}try{$("ocrBtn").disabled=true;let txt="";if(a)txt+="=== GUÍA REMITENTE: "+a.name+" ===\n"+await extractFile(a)+"\n\n";if(b)txt+="=== GUÍA TRANSPORTISTA: "+b.name+" ===\n"+await extractFile(b)+"\n";$("ocrText").value=txt;status("ocrStatus","Lectura terminada. Verifica el texto y completa los campos manualmente antes de guardar.","ok")}catch(e){status("ocrStatus","No se pudo leer el documento: "+e.message,"err")}finally{$("ocrBtn").disabled=false}};
+
+async function extractFile(file) {
+  if (!file) return "";
+
+  if (file.type.startsWith("image/")) {
+    const result = await Tesseract.recognize(file, "spa+eng", {
+      logger: m => {
+        if (m.status === "recognizing text") {
+          status("ocrStatus", "Leyendo imagen: " +
+            Math.round((m.progress || 0) * 100) + "%");
+        }
+      }
+    });
+    return result.data.text || "";
+  }
+
+  if (file.type === "application/pdf") {
+    const bytes = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    let text = "";
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(" ") + "\n";
+    }
+
+    // Si el PDF ya contiene texto, lo usamos directamente.
+    if (text.replace(/\s/g, "").length > 80) return text;
+
+    // Si es un PDF escaneado, aplicamos OCR a sus páginas.
+    text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await page.render({
+        canvasContext: canvas.getContext("2d"),
+        viewport
+      }).promise;
+
+      const result = await Tesseract.recognize(canvas, "spa+eng", {
+        logger: m => {
+          if (m.status === "recognizing text") {
+            status("ocrStatus", "Leyendo página " + i +
+              " de " + pdf.numPages + ": " +
+              Math.round((m.progress || 0) * 100) + "%");
+          }
+        }
+      });
+
+      text += result.data.text + "\n";
+    }
+
+    return text;
+  }
+
+  return "";
+}
+
+function cleanText(text) {
+  return (text || "").replace(/\s+/g, " ").trim();
+}
+
+function firstMatch(text, regex) {
+  const match = text.match(regex);
+  return match ? cleanText(match[1]) : "";
+}
+
+function parseDate(text) {
+  const match = text.match(
+    /(?:Fecha y hora de emisión|Fecha de emisión|Fecha de inicio de Traslado|Fecha de inicio de traslado)\s*:\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/i
+  );
+
+  if (!match) return "";
+
+  return match[3] + "-" +
+    match[2].padStart(2, "0") + "-" +
+    match[1].padStart(2, "0");
+}
+
+function parseWeight(text, preferTons) {
+  const match = text.match(
+    /Peso Bruto total de la carga\s*:\s*([\d.,]+)/i
+  );
+
+  if (!match) return "";
+
+  const raw = match[1];
+  const nearby = text.slice(
+    Math.max(0, match.index - 100),
+    match.index + match[0].length + 100
+  );
+
+  let value;
+
+  if (/(?:KGM|KG)\b/i.test(nearby) &&
+      /,\d{3}\b/.test(raw)) {
+    value = Number(raw.replace(/[.,]/g, ""));
+  } else if (raw.includes(",") && raw.includes(".")) {
+    value = Number(raw.replace(/,/g, ""));
+  } else if (/,(\d{1,2})$/.test(raw)) {
+    value = Number(raw.replace(",", "."));
+  } else {
+    value = Number(raw.replace(/,/g, ""));
+  }
+
+  if (!Number.isFinite(value)) return "";
+
+  if (/(?:KGM|KG)\b/i.test(nearby)) {
+    value = value / 1000;
+  } else if (!preferTons && value > 1000) {
+    value = value / 1000;
+  }
+
+  return Number(value.toFixed(3));
+}
+
+function parseGuideData(remText, transText) {
+  const rem = cleanText(remText);
+  const trans = cleanText(transText);
+  const all = rem + " " + trans;
+
+  const remGuide = firstMatch(
+    rem,
+    /\bT\d{3}\s*-\s*\d{5,}\b/i
+  );
+
+  const transGuide = firstMatch(
+    trans,
+    /\bEG0?3\s*-\s*\d{5,}\b/i
+  );
+
+  const plates = [
+    ...trans.matchAll(/Número de placa\s*:\s*([A-Z0-9-]+)/gi)
+  ].map(m => m[1].toUpperCase());
+
+  const date = parseDate(trans || rem);
+
+  const ruc = firstMatch(
+    rem,
+    /R\.?\s*U\.?\s*C\.?\s*(?:N[°º]\s*)?[:.]?\s*(\d{11})/i
+  );
+
+  let remitente = firstMatch(
+    trans,
+    /Datos del remitente\s*:\s*(.+?)(?:\s*-\s*REGISTRO|\s+RUC)/i
+  );
+
+  if (!remitente) {
+    remitente = firstMatch(
+      rem,
+      /^\s*(?:COMPAÑIA|COMPANIA)\s+DE\s+MINAS\s+BUENAVENTURA\s+S\.?A\.?A\.?/i
+    );
+  }
+
+  const origen = firstMatch(
+    all,
+    /Punto de Partida\s*:?\s*(.+?)(?=Punto de llegada|Fecha de inicio de Traslado|Motivo de Traslado|Datos del remitente)/i
+  );
+
+  const destino = firstMatch(
+    all,
+    /Punto de llegada\s*:?\s*(.+?)(?=Datos del remitente|Datos del destinatario|Bienes por Transportar|Bienes por transportar|Datos del traslado)/i
+  );
+
+  const driver = firstMatch(
+    trans,
+    /Datos de los conductores\s*:?\s*(?:Principal\s*:?\s*)?(.+?)(?=DOCUMENTO|DNI|Número de licencia)/i
+  );
+
+  const weight = parseWeight(trans, true) ||
+    parseWeight(rem, false);
+
+  return {
+    fecha: date,
+    guiaTrans: transGuide,
+    guiaRem: remGuide,
+    remitente,
+    ruc,
+    origen,
+    destino,
+    tracto: plates[0] || "",
+    carreta: plates[1] || "",
+    pesoCarga: weight,
+    chofer: driver
+  };
+}
+
+$("ocrBtn").onclick = async () => {
+  const a = $("remFile").files[0];
+  const b = $("transFile").files[0];
+
+  if (!a && !b) {
+    status("ocrStatus", "Selecciona al menos una guía en PDF o imagen.", "err");
+    return;
+  }
+
+  try {
+    $("ocrBtn").disabled = true;
+    status("ocrStatus", "Leyendo documentos...", "ok");
+
+    const remText = a ? await extractFile(a) : "";
+    const transText = b ? await extractFile(b) : "";
+
+    $("ocrText").value =
+      (a ? "=== GUÍA REMITENTE: " + a.name + " ===\n" + remText + "\n\n" : "") +
+      (b ? "=== GUÍA TRANSPORTISTA: " + b.name + " ===\n" + transText : "");
+
+    const data = parseGuideData(remText, transText);
+
+    for (const [id, value] of Object.entries(data)) {
+      if (value !== "" && value != null) {
+        $(id).value = value;
+      }
+    }
+
+    status(
+      "ocrStatus",
+      "Lectura terminada. Revisa los campos detectados y corrige los que estén vacíos o sean incorrectos.",
+      "ok"
+    );
+  } catch (e) {
+    status("ocrStatus", "No se pudo leer el documento: " + e.message, "err");
+  } finally {
+    $("ocrBtn").disabled = false;
+  }
+};
+
 $("saveBtn").onclick=async()=>{if(!$("confirmCheck").checked){status("saveStatus","Confirma que revisaste los datos.","err");return}try{if(!workbookItem||!workbookTable)throw new Error("Pulsa primero Comprobar Excel. Si no existe una tabla, debemos crearla desde Excel Online.");$("saveBtn").disabled=true;status("saveStatus","Subiendo las guías a OneDrive…");const remUrl=await uploadGuide($("remFile").files[0],"REMITENTE");const transUrl=await uploadGuide($("transFile").files[0],"TRANSPORTISTA");const vals=[val("fecha"),val("guiaTrans"),val("guiaRem"),val("remitente"),val("ruc"),val("origen"),val("destino"),val("tracto"),val("carreta"),num("pesoCarga"),num("pesoDescarga"),val("chofer"),val("factura"),val("estado"),num("precioTon"),num("precioTotal"),remUrl,transUrl];const row={values:[vals]};const dup=await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables/"+encodeURIComponent(workbookTable.name)+"/rows?$top=500");const idx=workbookTable.columns||[];const existing=dup.value||[];const guias=vals.slice(1,3).filter(Boolean);for(const r of existing){const cells=r.values?.[0]||[];if(guias.some(g=>cells.some(c=>String(c||"").trim().toLowerCase()===g.trim().toLowerCase())))throw new Error("Parece que uno de los números de guía ya existe. No se guardó para evitar duplicados.")}await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables/"+encodeURIComponent(workbookTable.name)+"/rows/add",{method:"POST",body:JSON.stringify(row)});status("saveStatus","Registro enviado a Excel. Abre el libro en Excel Online para confirmar que la fila y los enlaces quedaron correctamente. Las guías seleccionadas se guardaron en la carpeta GUIAS DE REMISION de OneDrive.","ok");$("confirmCheck").checked=false}catch(e){status("saveStatus","No se guardó el registro: "+e.message,"err")}finally{$("saveBtn").disabled=!(activeAccount&&$("confirmCheck").checked)}};
 function val(id){return $(id).value.trim()}function num(id){const v=val(id);return v===""?null:Number(v)}
 init();
