@@ -206,115 +206,156 @@ function parseWeight(text, preferTons) {
 
 
 function parseGuideData(remText, transText) {
-  const rem = cleanText(remText);
-  const trans = cleanText(transText);
-  const all = rem + " " + trans;
+  const rem = cleanText(remText || "");
+  const trans = cleanText(transText || "");
 
-  function findGuide(text, prefix) {
-    const re = new RegExp(
-      "\\b(" + prefix + "\\s*[- ]?\\s*\\d{3}\\s*[- ]\\s*\\d{4,})\\b",
-      "i"
-    );
-    const m = text.match(re);
-    return m ? m[1].replace(/\s+/g, "").replace(/–/g, "-") : "";
+  // Buscar un dato en un texto mediante una expresión regular.
+  function getMatch(text, regex, group = 1) {
+    const match = text.match(regex);
+    return match ? cleanText(match[group]) : "";
   }
 
-  const remGuide =
-    findGuide(rem, "T\\d{3}") ||
-    findGuide(rem, "T");
+  // Normalizar números de guía sin perder los ceros iniciales.
+  function normalizeGuide(text, regex) {
+    const match = text.match(regex);
+    return match
+      ? match[0].replace(/\s+/g, "").replace(/[–—]/g, "-").toUpperCase()
+      : "";
+  }
 
-  const transGuide =
-    findGuide(trans, "EG0?3") ||
-    findGuide(trans, "EG");
-
-  const plates = [
-    ...trans.matchAll(
-      /(?:Número de placa|Placa)\s*:?\s*([A-Z0-9-]{5,8})/gi
-    )
-  ].map(m => m[1].toUpperCase());
-
-  const date =
-    parseDate(trans) ||
-    parseDate(rem);
-
-  let ruc = firstMatch(
+  // 1. Números de ambas guías.
+  const guiaRem = normalizeGuide(
     rem,
-    /R\.?\s*U\.?\s*C\.?\s*(?:N[°ºo]\s*)?[:.]?\s*(\d{11})/i
+    /\bT\s*106\s*[-–—]\s*\d{4,}\b/i
   );
 
-  if (!ruc) {
-    ruc = firstMatch(
-      trans,
-      /R\.?\s*U\.?\s*C\.?\s*(?:N[°ºo]\s*)?[:.]?\s*(\d{11})/i
+  const guiaTrans = normalizeGuide(
+    trans,
+    /\bEG\s*0?3\s*[-–—]\s*\d{4,}\b/i
+  );
+
+  // 2. Fecha. Se busca primero la fecha de inicio del traslado.
+  function getDate(text) {
+    let match = text.match(
+      /Fecha de inicio de Traslado\s*:?\s*(\d{2})\/(\d{2})\/(\d{4})/i
     );
+
+    if (!match) {
+      match = text.match(
+        /(\d{2})\/(\d{2})\/(\d{4})/
+      );
+    }
+
+    return match
+      ? `${match[3]}-${match[2]}-${match[1]}`
+      : "";
   }
 
-  let remitente = firstMatch(
-    trans,
-    /Datos del remitente\s*:?\s*(.+?)(?=\s*-\s*REGISTRO|\s+RUC\b)/i
+  const fecha = getDate(rem) || getDate(trans);
+
+  // 3. RUC y nombre del remitente del viaje.
+  const rucRem = getMatch(
+    rem,
+    /RUC\s*N[°ºo]?\s*(\d{11})/i
   );
 
-  if (!remitente) {
-    remitente = firstMatch(
+  const nombreRem = getMatch(
+    rem,
+    /\b(COMPA[NÑ]IA\s+DE\s+MINAS\s+BUENAVENTURA\s+S\.?A\.?A\.?)/i
+  );
+
+  // 4. Placas: extraerlas junto a sus etiquetas de vehículo.
+  function getPlates(text) {
+    const found = [];
+    const regex =
+      /Número de placa\s*:\s*(?:Principal|Secundario\s*1)\s*:?\s*([A-Z0-9-]{5,8})/gi;
+
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const plate = match[1].toUpperCase();
+      if (!found.includes(plate)) found.push(plate);
+    }
+
+    // Alternativa para texto OCR que cambió el orden de las etiquetas.
+    if (found.length === 0) {
+      const fallback =
+        /(?:Principal|Secundario\s*1)\s*:?\s*([A-Z0-9]{5,8})/gi;
+
+      while ((match = fallback.exec(text)) !== null) {
+        const plate = match[1].toUpperCase();
+        if (!found.includes(plate)) found.push(plate);
+      }
+    }
+
+    return found;
+  }
+
+  const plates = getPlates(trans);
+
+  // 5. Conductor: nombre anterior a su documento de identidad.
+  let chofer = getMatch(
+    trans,
+    /Principal\s*:?\s*([A-ZÁÉÍÓÚÑ ]{8,80}?)\s*-\s*DOCUMENTO NACIONAL DE IDENTIDAD/i
+  );
+
+  if (!chofer) {
+    chofer = getMatch(
       rem,
-      /((?:COMPAÑIA|COMPANIA)\s+DE\s+MINAS\s+BUENAVENTURA\s+S\.?A\.?A\.?)/i
+      /([A-ZÁÉÍÓÚÑ ]{8,80}?)\s*-\s*DOCUMENTO NACIONAL DE IDENTIDAD/i
     );
   }
 
-  let origen = firstMatch(
-    trans,
-    /Punto de Partida\s*:?\s*(.+?)(?=\s*Punto de llegada)/i
+  // 6. Peso: en la guía del transportista figura en TNE.
+  function getWeight(text) {
+    const match = text.match(/\bTNE\s*([\d.,]+)/i);
+    if (!match) return "";
+
+    let raw = match[1];
+
+    // En estos documentos, 35.08 significa 35.08 toneladas.
+    if (raw.includes(".") && raw.includes(",")) {
+      raw = raw.replace(/,/g, "");
+    } else {
+      raw = raw.replace(",", ".");
+    }
+
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : "";
+  }
+
+  const pesoCarga = getWeight(trans) || getWeight(rem);
+
+  // 7. Origen y destino según los domicilios de la guía del remitente.
+  const origen = getMatch(
+    rem,
+    /Punto de Partida\s*:?\s*(.+?)\s*Punto de llegada/i
+  ) || getMatch(
+    rem,
+    /Domicilio de partida\s*:?\s*(.+?)\s*Domicilio de llegada/i
   );
 
-  let destino = firstMatch(
-    trans,
-    /Punto de llegada\s*:?\s*(.+?)(?=\s*Datos del remitente|\s*Datos del destinatario|\s*Bienes por Transportar|\s*Datos del traslado)/i
+  const destino = getMatch(
+    rem,
+    /Domicilio de llegada\s*:?\s*(.+?)\s*Transportista/i
   );
 
-  if (!origen) {
-    origen = firstMatch(
-      rem,
-      /Domicilio de partida\s*:?\s*(.+?)(?=\s*Domicilio de llegada)/i
-    );
-  }
-
-  if (!destino) {
-    destino = firstMatch(
-      rem,
-      /Domicilio de llegada\s*:?\s*(.+?)(?=\s*Transportista|\s*R\.?U\.?C\.?)/i
-    );
-  }
-
-  let driver = firstMatch(
-    trans,
-    /(?:Datos de los conductores\s*:?\s*)?(?:Principal\s*:?\s*)?(.+?)(?=\s*DOCUMENTO|\s*DNI|\s*Número de licencia)/i
-  );
-
-  if (!driver) {
-    driver = firstMatch(
-      trans,
-      /Conductor\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ ]+)/i
-    );
-  }
-
-  const weight =
-    parseWeight(trans, true) ||
-    parseWeight(rem, false);
-
+  // La guía del remitente es la fuente principal de los datos
+  // del remitente. No usar automáticamente el destinatario.
   return {
-    fecha: date,
-    guiaTrans: transGuide,
-    guiaRem: remGuide,
-    remitente: remitente,
-    ruc: ruc,
+    fecha: fecha,
+    guiaTrans: guiaTrans,
+    guiaRem: guiaRem,
+    remitente: nombreRem,
+    ruc: rucRem,
     origen: origen,
     destino: destino,
     tracto: plates[0] || "",
     carreta: plates[1] || "",
-    pesoCarga: weight,
-    chofer: driver
+    pesoCarga: pesoCarga,
+    chofer: chofer
   };
 }
+
 
 
 $("ocrBtn").onclick = async () => {
