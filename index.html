@@ -204,76 +204,118 @@ function parseWeight(text, preferTons) {
   return Number(value.toFixed(3));
 }
 
+
 function parseGuideData(remText, transText) {
   const rem = cleanText(remText);
   const trans = cleanText(transText);
   const all = rem + " " + trans;
 
-  const remGuide = firstMatch(
-    rem,
-    /\bT\d{3}\s*-\s*\d{5,}\b/i
-  );
+  function findGuide(text, prefix) {
+    const re = new RegExp(
+      "\\b(" + prefix + "\\s*[- ]?\\s*\\d{3}\\s*[- ]\\s*\\d{4,})\\b",
+      "i"
+    );
+    const m = text.match(re);
+    return m ? m[1].replace(/\s+/g, "").replace(/–/g, "-") : "";
+  }
 
-  const transGuide = firstMatch(
-    trans,
-    /\bEG0?3\s*-\s*\d{5,}\b/i
-  );
+  const remGuide =
+    findGuide(rem, "T\\d{3}") ||
+    findGuide(rem, "T");
+
+  const transGuide =
+    findGuide(trans, "EG0?3") ||
+    findGuide(trans, "EG");
 
   const plates = [
-    ...trans.matchAll(/Número de placa\s*:\s*([A-Z0-9-]+)/gi)
+    ...trans.matchAll(
+      /(?:Número de placa|Placa)\s*:?\s*([A-Z0-9-]{5,8})/gi
+    )
   ].map(m => m[1].toUpperCase());
 
-  const date = parseDate(trans || rem);
+  const date =
+    parseDate(trans) ||
+    parseDate(rem);
 
-  const ruc = firstMatch(
+  let ruc = firstMatch(
     rem,
-    /R\.?\s*U\.?\s*C\.?\s*(?:N[°º]\s*)?[:.]?\s*(\d{11})/i
+    /R\.?\s*U\.?\s*C\.?\s*(?:N[°ºo]\s*)?[:.]?\s*(\d{11})/i
   );
+
+  if (!ruc) {
+    ruc = firstMatch(
+      trans,
+      /R\.?\s*U\.?\s*C\.?\s*(?:N[°ºo]\s*)?[:.]?\s*(\d{11})/i
+    );
+  }
 
   let remitente = firstMatch(
     trans,
-    /Datos del remitente\s*:\s*(.+?)(?:\s*-\s*REGISTRO|\s+RUC)/i
+    /Datos del remitente\s*:?\s*(.+?)(?=\s*-\s*REGISTRO|\s+RUC\b)/i
   );
 
   if (!remitente) {
     remitente = firstMatch(
       rem,
-      /^\s*(?:COMPAÑIA|COMPANIA)\s+DE\s+MINAS\s+BUENAVENTURA\s+S\.?A\.?A\.?/i
+      /((?:COMPAÑIA|COMPANIA)\s+DE\s+MINAS\s+BUENAVENTURA\s+S\.?A\.?A\.?)/i
     );
   }
 
-  const origen = firstMatch(
-    all,
-    /Punto de Partida\s*:?\s*(.+?)(?=Punto de llegada|Fecha de inicio de Traslado|Motivo de Traslado|Datos del remitente)/i
-  );
-
-  const destino = firstMatch(
-    all,
-    /Punto de llegada\s*:?\s*(.+?)(?=Datos del remitente|Datos del destinatario|Bienes por Transportar|Bienes por transportar|Datos del traslado)/i
-  );
-
-  const driver = firstMatch(
+  let origen = firstMatch(
     trans,
-    /Datos de los conductores\s*:?\s*(?:Principal\s*:?\s*)?(.+?)(?=DOCUMENTO|DNI|Número de licencia)/i
+    /Punto de Partida\s*:?\s*(.+?)(?=\s*Punto de llegada)/i
   );
 
-  const weight = parseWeight(trans, true) ||
+  let destino = firstMatch(
+    trans,
+    /Punto de llegada\s*:?\s*(.+?)(?=\s*Datos del remitente|\s*Datos del destinatario|\s*Bienes por Transportar|\s*Datos del traslado)/i
+  );
+
+  if (!origen) {
+    origen = firstMatch(
+      rem,
+      /Domicilio de partida\s*:?\s*(.+?)(?=\s*Domicilio de llegada)/i
+    );
+  }
+
+  if (!destino) {
+    destino = firstMatch(
+      rem,
+      /Domicilio de llegada\s*:?\s*(.+?)(?=\s*Transportista|\s*R\.?U\.?C\.?)/i
+    );
+  }
+
+  let driver = firstMatch(
+    trans,
+    /(?:Datos de los conductores\s*:?\s*)?(?:Principal\s*:?\s*)?(.+?)(?=\s*DOCUMENTO|\s*DNI|\s*Número de licencia)/i
+  );
+
+  if (!driver) {
+    driver = firstMatch(
+      trans,
+      /Conductor\s*:?\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ ]+)/i
+    );
+  }
+
+  const weight =
+    parseWeight(trans, true) ||
     parseWeight(rem, false);
 
   return {
     fecha: date,
     guiaTrans: transGuide,
     guiaRem: remGuide,
-    remitente,
-    ruc,
-    origen,
-    destino,
+    remitente: remitente,
+    ruc: ruc,
+    origen: origen,
+    destino: destino,
     tracto: plates[0] || "",
     carreta: plates[1] || "",
     pesoCarga: weight,
     chofer: driver
   };
 }
+
 
 $("ocrBtn").onclick = async () => {
   const a = $("remFile").files[0];
