@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registro de Guías - Operaciones</title>
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#182230;background:#f4f7fb}*{box-sizing:border-box}body{margin:0}.top{background:#123b63;color:white;padding:18px 20px}.top h1{font-size:21px;margin:0 0 5px}.top p{margin:0;color:#dbeafe;font-size:13px}.wrap{max-width:1000px;margin:22px auto;padding:0 14px}.card{background:white;border:1px solid #dce4ee;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 3px 12px #132c4c0b}.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{display:flex;flex-direction:column;gap:5px}.field label{font-size:13px;font-weight:650}.field input,.field textarea,.field select{font:inherit;border:1px solid #cbd5e1;border-radius:8px;padding:10px;width:100%;background:white}.field textarea{min-height:70px}.full{grid-column:1/-1}.btn{border:0;border-radius:9px;padding:11px 15px;font-weight:700;cursor:pointer;background:#1464a5;color:white}.btn.secondary{background:#e7eef7;color:#153b5e}.btn:disabled{opacity:.5;cursor:wait}.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}.status{font-size:13px;padding:10px 12px;background:#eef5fc;border-radius:8px;white-space:pre-wrap}.status.ok{background:#eaf8ef;color:#17643a}.status.err{background:#fff0f0;color:#a12727}.muted{color:#5d6b7d;font-size:13px}.hidden{display:none}.small{font-size:12px}.badge{display:inline-block;border-radius:999px;background:#eaf2fb;color:#164a79;padding:4px 8px;font-size:12px}.check{display:flex;align-items:center;gap:8px;font-size:13px}.check input{width:auto}.title-row{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}h2{font-size:17px;margin:0 0 13px}.required{color:#b42318}@media(max-width:650px){.row{grid-template-columns:1fr}.full{grid-column:auto}.wrap{margin:12px auto}.card{padding:14px}.top h1{font-size:19px}}
+</style>
+</head>
+<body>
+<header class="top"><h1>Registro de Guías · Operaciones</h1><p>Registro asistido de viajes en tu OneDrive empresarial</p></header>
+<main class="wrap">
+<section class="card">
+ <div class="title-row"><div><h2>1. Conectar con Microsoft</h2><p class="muted">Inicia sesión con la cuenta empresarial que tiene acceso a 1. OPERACIONES.xlsx.</p></div><span id="authBadge" class="badge">Sin conexión</span></div>
+ <div class="actions"><button class="btn" id="loginBtn">Iniciar sesión</button><button class="btn secondary" id="logoutBtn" disabled>Cerrar sesión</button></div>
+ <p class="muted small">La aplicación no pide ni guarda tu contraseña. El acceso se autoriza mediante Microsoft.</p>
+</section>
+<section class="card">
+ <h2>2. Cargar las guías</h2>
+ <div class="row">
+  <div class="field"><label>Guía de remisión del remitente (PDF o foto)</label><input id="remFile" type="file" accept="application/pdf,image/*"></div>
+  <div class="field"><label>Guía de remisión del transportista (PDF o foto)</label><input id="transFile" type="file" accept="application/pdf,image/*"></div>
+ </div>
+ <div class="actions"><button class="btn secondary" id="ocrBtn">Leer texto de las guías</button></div>
+ <p class="muted">La lectura automática es una ayuda: revisa los campos detectados antes de guardar. Para PDF se analiza la primera página en esta versión.</p>
+ <div id="ocrStatus" class="status hidden"></div>
+ <div class="field" style="margin-top:12px"><label>Texto extraído (para revisar)</label><textarea id="ocrText" placeholder="Aquí aparecerá el texto detectado. Puedes copiar datos al formulario o corregirlos manualmente."></textarea></div>
+</section>
+<section class="card">
+ <h2>3. Datos del viaje</h2>
+ <div class="row">
+  <div class="field"><label>Fecha</label><input id="fecha" type="date"></div>
+  <div class="field"><label>Guía transportista DEA</label><input id="guiaTrans" placeholder="Ej. T001-000123"></div>
+  <div class="field"><label>Guía remitente</label><input id="guiaRem" placeholder="Número de guía"></div>
+  <div class="field"><label>Nombre remitente</label><input id="remitente"></div>
+  <div class="field"><label>RUC remitente</label><input id="ruc" inputmode="numeric"></div>
+  <div class="field"><label>Punto de partida</label><input id="origen"></div>
+  <div class="field"><label>Punto de llegada</label><input id="destino"></div>
+  <div class="field"><label>Placa tracto</label><input id="tracto"></div>
+  <div class="field"><label>Placa carreta</label><input id="carreta"></div>
+  <div class="field"><label>Peso de carga (t)</label><input id="pesoCarga" type="number" step="any"></div>
+  <div class="field"><label>Peso de descarga (t)</label><input id="pesoDescarga" type="number" step="any"></div>
+  <div class="field"><label>Chofer</label><input id="chofer"></div>
+  <div class="field"><label>Número de factura</label><input id="factura"></div>
+  <div class="field"><label>Estado</label><input id="estado" placeholder="Ej. Pendiente / Completo"></div>
+  <div class="field"><label>Precio por tonelada</label><input id="precioTon" type="number" step="any"></div>
+  <div class="field"><label>Precio total con IGV</label><input id="precioTotal" type="number" step="any"></div>
+  <div class="field full"><label>Observaciones</label><textarea id="obs" placeholder="Datos pendientes o notas de revisión"></textarea></div>
+ </div>
+ <label class="check" style="margin-top:12px"><input type="checkbox" id="confirmCheck"> Confirmo que revisé los datos antes de registrarlos.</label>
+ <div class="actions"><button class="btn" id="saveBtn" disabled>Guardar en Excel de OneDrive</button><button class="btn secondary" id="prepareBtn" disabled>Comprobar Excel</button></div>
+ <div id="saveStatus" class="status hidden"></div>
+</section>
+<section class="card">
+ <h2>Configuración de esta primera versión</h2>
+ <p class="muted">Archivo esperado: <b>2. DATOS HISTORICO / 1. OPERACIONES.xlsx</b>, hoja <b>VIAJES</b>. La primera conexión comprobará si el archivo existe y si la hoja tiene una tabla de Excel. Si no existe una tabla, la aplicación te lo indicará antes de modificar el libro.</p>
+ <p class="muted small">Esta es una versión inicial. El reconocimiento OCR no completa automáticamente todos los campos todavía; revisa el texto detectado y llena los datos faltantes. Los enlaces a documentos se agregarán cuando se habilite el almacenamiento de archivos en OneDrive.</p>
+</section>
+</main>
+<script>
+const CLIENT_ID = "1d0ceced-bd25-4e1d-a874-f2056e80ad6e";
+const TENANT_ID = "e6de840a-7cbf-497a-9081-7b9ca41f0229";
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+const msalConfig = {auth:{clientId:CLIENT_ID,authority:"https://login.microsoftonline.com/"+TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:"sessionStorage"}};
+const graphScopes = ["User.Read","Files.ReadWrite"];
+let msalApp, activeAccount, workbookItem, workbookTable, docsFolder;
+const $ = id => document.getElementById(id);
+function status(id,msg,type=""){const el=$(id);el.textContent=msg;el.className="status "+type;el.classList.remove("hidden")}
+function hideStatus(id){$(id).classList.add("hidden")}
+function setAuth(account){activeAccount=account; $("authBadge").textContent=account?account.username:"Sin conexión";$("loginBtn").disabled=!!account;$("logoutBtn").disabled=!account;$("prepareBtn").disabled=!account;$("saveBtn").disabled=!account}
+async function init(){try{msalApp=new msal.PublicClientApplication(msalConfig);await msalApp.initialize();const response=await msalApp.handleRedirectPromise();if(response?.account)msalApp.setActiveAccount(response.account);const accounts=msalApp.getAllAccounts();if(accounts.length){msalApp.setActiveAccount(accounts[0]);setAuth(accounts[0])}else setAuth(null)}catch(e){status("saveStatus","Error al iniciar autenticación: "+e.message,"err")}}
+async function token(){let a=msalApp.getActiveAccount()||activeAccount;if(!a)throw new Error("Primero inicia sesión con Microsoft.");try{return (await msalApp.acquireTokenSilent({scopes:graphScopes,account:a})).accessToken}catch(e){await msalApp.acquireTokenRedirect({scopes:graphScopes,account:a});throw e}}
+async function graph(path,opts={}){const t=await token();const r=await fetch("https://graph.microsoft.com/v1.0"+path,{...opts,headers:{Authorization:"Bearer "+t,"Content-Type":"application/json",...(opts.headers||{})}});if(!r.ok){let b=await r.text();throw new Error("Microsoft Graph ("+r.status+"): "+b.slice(0,500))}if(r.status===204)return null;return r.json()}
+async function graphUpload(path,file){const t=await token();const r=await fetch("https://graph.microsoft.com/v1.0"+path,{method:"PUT",headers:{Authorization:"Bearer "+t,"Content-Type":file.type||"application/octet-stream"},body:file});if(!r.ok){let b=await r.text();throw new Error("Error subiendo archivo ("+r.status+"): "+b.slice(0,400))}return r.json()}
+async function ensureDocsFolder(){const parent=await graph("/me/drive/root:/2. DATOS HISTORICO");const children=await graph("/me/drive/items/"+parent.id+"/children");let f=children.value.find(x=>x.name==="GUIAS DE REMISION"&&x.folder);if(!f)f=await graph("/me/drive/items/"+parent.id+"/children",{method:"POST",body:JSON.stringify({name:"GUIAS DE REMISION",folder:{}, "@microsoft.graph.conflictBehavior":"fail"})});docsFolder=f;return f}
+async function uploadGuide(file,kind){if(!file)return "";if(!docsFolder)await ensureDocsFolder();const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");const filename=new Date().toISOString().replace(/[:.]/g,"-")+"_"+kind+"_"+safe;const item=await graphUpload("/me/drive/items/"+docsFolder.id+":/"+encodeURIComponent(filename)+":/content",file);return item.webUrl||""}
+$("loginBtn").onclick=async()=>{try{await msalApp.loginRedirect({scopes:graphScopes})}catch(e){status("saveStatus",e.message,"err")}};
+$("logoutBtn").onclick=()=>msalApp.logoutRedirect();
+$("confirmCheck").onchange=()=>{$("saveBtn").disabled=!(activeAccount&&$("confirmCheck").checked)};
+$("prepareBtn").onclick=async()=>{try{status("saveStatus","Buscando el libro de Excel en OneDrive…");const path="/me/drive/root:/2. DATOS HISTORICO/1. OPERACIONES.xlsx";workbookItem=await graph(path);const ws=await graph("/me/drive/items/"+workbookItem.id+"/workbook/worksheets");const viaje=ws.value.find(x=>x.name.toUpperCase()==="VIAJES");if(!viaje)throw new Error("No encontré la hoja VIAJES en ese libro.");const tabs=await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables");workbookTable=tabs.value.find(t=>t.name.toUpperCase()==="VIAJES"||t.name.toUpperCase()==="TABLAVIAJES")||tabs.value[0];if(workbookTable){status("saveStatus","Excel encontrado: "+workbookItem.name+" · Hoja VIAJES · Tabla "+workbookTable.name+". No se modificó ningún dato.","ok")}else{status("saveStatus","Encontré el libro y la hoja VIAJES, pero no detecté una tabla de Excel. Para evitar alterar tus datos, aún no guardaré filas. Primero debemos convertir el rango de VIAJES en una tabla desde Excel Online.","err")}}catch(e){status("saveStatus","No se pudo comprobar el Excel. Revisa que la ruta sea correcta y que hayas iniciado sesión con la cuenta empresarial que tiene acceso. "+e.message,"err")}};
+async function extractFile(file){if(!file)return "";if(file.type.startsWith("image/")){const result=await Tesseract.recognize(file,"spa+eng",{logger:m=>{if(m.status==="recognizing text")status("ocrStatus","Leyendo imagen: "+Math.round((m.progress||0)*100)+"%")}});return result.data.text}if(file.type==="application/pdf"){const bytes=await file.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:bytes}).promise;const page=await pdf.getPage(1);const viewport=page.getViewport({scale:1.8});const canvas=document.createElement("canvas");canvas.width=viewport.width;canvas.height=viewport.height;await page.render({canvasContext:canvas.getContext("2d"),viewport}).promise;const result=await Tesseract.recognize(canvas,"spa+eng",{logger:m=>{if(m.status==="recognizing text")status("ocrStatus","Leyendo PDF: "+Math.round((m.progress||0)*100)+"%")}});return result.data.text}return ""}
+$("ocrBtn").onclick=async()=>{const a=$("remFile").files[0],b=$("transFile").files[0];if(!a&&!b){status("ocrStatus","Selecciona al menos una guía en PDF o imagen.","err");return}try{$("ocrBtn").disabled=true;let txt="";if(a)txt+="=== GUÍA REMITENTE: "+a.name+" ===\n"+await extractFile(a)+"\n\n";if(b)txt+="=== GUÍA TRANSPORTISTA: "+b.name+" ===\n"+await extractFile(b)+"\n";$("ocrText").value=txt;status("ocrStatus","Lectura terminada. Verifica el texto y completa los campos manualmente antes de guardar.","ok")}catch(e){status("ocrStatus","No se pudo leer el documento: "+e.message,"err")}finally{$("ocrBtn").disabled=false}};
+$("saveBtn").onclick=async()=>{if(!$("confirmCheck").checked){status("saveStatus","Confirma que revisaste los datos.","err");return}try{if(!workbookItem||!workbookTable)throw new Error("Pulsa primero Comprobar Excel. Si no existe una tabla, debemos crearla desde Excel Online.");$("saveBtn").disabled=true;status("saveStatus","Subiendo las guías a OneDrive…");const remUrl=await uploadGuide($("remFile").files[0],"REMITENTE");const transUrl=await uploadGuide($("transFile").files[0],"TRANSPORTISTA");const vals=[val("fecha"),val("guiaTrans"),val("guiaRem"),val("remitente"),val("ruc"),val("origen"),val("destino"),val("tracto"),val("carreta"),num("pesoCarga"),num("pesoDescarga"),val("chofer"),val("factura"),val("estado"),num("precioTon"),num("precioTotal"),remUrl,transUrl];const row={values:[vals]};const dup=await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables/"+encodeURIComponent(workbookTable.name)+"/rows?$top=500");const idx=workbookTable.columns||[];const existing=dup.value||[];const guias=vals.slice(1,3).filter(Boolean);for(const r of existing){const cells=r.values?.[0]||[];if(guias.some(g=>cells.some(c=>String(c||"").trim().toLowerCase()===g.trim().toLowerCase())))throw new Error("Parece que uno de los números de guía ya existe. No se guardó para evitar duplicados.")}await graph("/me/drive/items/"+workbookItem.id+"/workbook/tables/"+encodeURIComponent(workbookTable.name)+"/rows/add",{method:"POST",body:JSON.stringify(row)});status("saveStatus","Registro enviado a Excel. Abre el libro en Excel Online para confirmar que la fila y los enlaces quedaron correctamente. Las guías seleccionadas se guardaron en la carpeta GUIAS DE REMISION de OneDrive.","ok");$("confirmCheck").checked=false}catch(e){status("saveStatus","No se guardó el registro: "+e.message,"err")}finally{$("saveBtn").disabled=!(activeAccount&&$("confirmCheck").checked)}};
+function val(id){return $(id).value.trim()}function num(id){const v=val(id);return v===""?null:Number(v)}
+init();
+</script>
+</body>
+</html>
